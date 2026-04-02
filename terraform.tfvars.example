@@ -1,0 +1,38 @@
+# =============================================================================
+# terraform.tfvars.example
+# Copia este archivo a terraform.tfvars y completa los valores requeridos.
+# terraform.tfvars está en .gitignore — este archivo es seguro para commitear.
+# =============================================================================
+
+# Región AWS Academy (no cambiar)
+aws_region = "us-east-1"
+
+# Nombre del proyecto (prefijo para todos los recursos)
+project_name = "innovatech"
+
+# Red (según enunciado del EP1)
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"
+availability_zone   = "us-east-1a"
+
+# Instancia EC2
+instance_type = "t3.micro"
+
+# AMI de Amazon Linux 2023 en us-east-1
+# Ejecuta este comando para obtener la más reciente:
+#   aws ec2 describe-images \
+#     --owners amazon \
+#     --filters "Name=name,Values=al2023-ami-*-x86_64" \
+#               "Name=state,Values=available" \
+#     --query "sort_by(Images,&CreationDate)[-1].ImageId" \
+#     --output text
+ami_id = "ami-XXXXXXXXXXXXXXXXX"
+
+# Key Pair para SSH (opcional - SSM Session Manager funciona sin él)
+# Crea uno en: EC2 Console → Key Pairs → Create key pair
+# Descarga el .pem y colócalo en tu carpeta ~/.ssh/
+# key_name = "vockey"
+
+# Instance Profile de AWS Academy (no cambiar)
+iam_instance_profile = "LabInstanceProfile"
