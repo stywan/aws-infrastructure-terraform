@@ -1,7 +1,8 @@
 # =============================================================================
 # Módulo: compute
-# Crea Launch Templates y EC2 instances para las 3 capas.
-# Usa el LabInstanceProfile pre-existente de AWS Academy (no se puede crear IAM).
+# Crea Launch Templates y EC2 instances para las 3 capas en 2 AZs.
+# Cada AZ tiene: 1 Frontend (subred pública), 1 Backend, 1 Data (subredes privadas).
+# Los Security Groups son compartidos entre AZs (recursos VPC-level).
 # =============================================================================
 
 # --- Data Source: Instance Profile pre-existente de AWS Academy ---
@@ -10,23 +11,21 @@ data "aws_iam_instance_profile" "lab" {
 }
 
 # =============================================================================
-# LAUNCH TEMPLATES
-# Definen la configuración de lanzamiento para cada capa.
-# Visibles en: EC2 Console → Launch Templates
+# LAUNCH TEMPLATES FRONTEND (uno por AZ)
 # =============================================================================
 
-# --- Launch Template: Frontend ---
 resource "aws_launch_template" "frontend" {
+  count = length(var.public_subnet_ids)
+
   name_prefix   = "${var.project_name}-lt-frontend-"
   image_id      = var.ami_id
   instance_type = var.instance_type
-
-  key_name = var.key_name
+  key_name      = var.key_name
 
   network_interfaces {
     associate_public_ip_address = true
     security_groups             = [var.frontend_sg_id]
-    subnet_id                   = var.public_subnet_id
+    subnet_id                   = var.public_subnet_ids[count.index]
   }
 
   iam_instance_profile {
@@ -38,7 +37,7 @@ resource "aws_launch_template" "frontend" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name    = "${var.project_name}-frontend"
+      Name    = "${var.project_name}-frontend-${count.index + 1}"
       Tier    = "frontend"
       Project = var.project_name
     }
@@ -47,29 +46,33 @@ resource "aws_launch_template" "frontend" {
   tag_specifications {
     resource_type = "volume"
     tags = {
-      Name    = "${var.project_name}-frontend-vol"
+      Name    = "${var.project_name}-frontend-vol-${count.index + 1}"
       Project = var.project_name
     }
   }
 
   tags = {
-    Name    = "${var.project_name}-lt-frontend"
+    Name    = "${var.project_name}-lt-frontend-${count.index + 1}"
     Project = var.project_name
   }
 }
 
-# --- Launch Template: Backend ---
+# =============================================================================
+# LAUNCH TEMPLATES BACKEND (uno por AZ)
+# =============================================================================
+
 resource "aws_launch_template" "backend" {
+  count = length(var.private_backend_subnet_ids)
+
   name_prefix   = "${var.project_name}-lt-backend-"
   image_id      = var.ami_id
   instance_type = var.instance_type
-
-  key_name = var.key_name
+  key_name      = var.key_name
 
   network_interfaces {
     associate_public_ip_address = false
     security_groups             = [var.backend_sg_id]
-    subnet_id                   = var.private_subnet_id
+    subnet_id                   = var.private_backend_subnet_ids[count.index]
   }
 
   iam_instance_profile {
@@ -81,7 +84,7 @@ resource "aws_launch_template" "backend" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name    = "${var.project_name}-backend"
+      Name    = "${var.project_name}-backend-${count.index + 1}"
       Tier    = "backend"
       Project = var.project_name
     }
@@ -90,29 +93,33 @@ resource "aws_launch_template" "backend" {
   tag_specifications {
     resource_type = "volume"
     tags = {
-      Name    = "${var.project_name}-backend-vol"
+      Name    = "${var.project_name}-backend-vol-${count.index + 1}"
       Project = var.project_name
     }
   }
 
   tags = {
-    Name    = "${var.project_name}-lt-backend"
+    Name    = "${var.project_name}-lt-backend-${count.index + 1}"
     Project = var.project_name
   }
 }
 
-# --- Launch Template: Data ---
+# =============================================================================
+# LAUNCH TEMPLATES DATA (uno por AZ)
+# =============================================================================
+
 resource "aws_launch_template" "data" {
+  count = length(var.private_data_subnet_ids)
+
   name_prefix   = "${var.project_name}-lt-data-"
   image_id      = var.ami_id
   instance_type = var.instance_type
-
-  key_name = var.key_name
+  key_name      = var.key_name
 
   network_interfaces {
     associate_public_ip_address = false
     security_groups             = [var.data_sg_id]
-    subnet_id                   = var.private_subnet_id
+    subnet_id                   = var.private_data_subnet_ids[count.index]
   }
 
   iam_instance_profile {
@@ -124,7 +131,7 @@ resource "aws_launch_template" "data" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name    = "${var.project_name}-data"
+      Name    = "${var.project_name}-data-${count.index + 1}"
       Tier    = "data"
       Project = var.project_name
     }
@@ -133,59 +140,61 @@ resource "aws_launch_template" "data" {
   tag_specifications {
     resource_type = "volume"
     tags = {
-      Name    = "${var.project_name}-data-vol"
+      Name    = "${var.project_name}-data-vol-${count.index + 1}"
       Project = var.project_name
     }
   }
 
   tags = {
-    Name    = "${var.project_name}-lt-data"
+    Name    = "${var.project_name}-lt-data-${count.index + 1}"
     Project = var.project_name
   }
 }
 
 # =============================================================================
 # EC2 INSTANCES
-# Cada instancia referencia su Launch Template.
 # =============================================================================
 
-# --- EC2: Frontend (subred pública, IP pública) ---
 resource "aws_instance" "frontend" {
+  count = length(var.public_subnet_ids)
+
   launch_template {
-    id      = aws_launch_template.frontend.id
-    version = "$Latest"
+    id      = aws_launch_template.frontend[count.index].id
+    version = aws_launch_template.frontend[count.index].latest_version
   }
 
   tags = {
-    Name    = "${var.project_name}-frontend"
+    Name    = "${var.project_name}-frontend-${count.index + 1}"
     Tier    = "frontend"
     Project = var.project_name
   }
 }
 
-# --- EC2: Backend (subred privada, solo accesible desde Frontend) ---
 resource "aws_instance" "backend" {
+  count = length(var.private_backend_subnet_ids)
+
   launch_template {
-    id      = aws_launch_template.backend.id
-    version = "$Latest"
+    id      = aws_launch_template.backend[count.index].id
+    version = aws_launch_template.backend[count.index].latest_version
   }
 
   tags = {
-    Name    = "${var.project_name}-backend"
+    Name    = "${var.project_name}-backend-${count.index + 1}"
     Tier    = "backend"
     Project = var.project_name
   }
 }
 
-# --- EC2: Data (subred privada, solo accesible desde Backend) ---
 resource "aws_instance" "data" {
+  count = length(var.private_data_subnet_ids)
+
   launch_template {
-    id      = aws_launch_template.data.id
-    version = "$Latest"
+    id      = aws_launch_template.data[count.index].id
+    version = aws_launch_template.data[count.index].latest_version
   }
 
   tags = {
-    Name    = "${var.project_name}-data"
+    Name    = "${var.project_name}-data-${count.index + 1}"
     Tier    = "data"
     Project = var.project_name
   }

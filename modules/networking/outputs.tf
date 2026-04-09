@@ -3,19 +3,24 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
-output "public_subnet_id" {
-  description = "ID de la subred pública (Frontend)"
-  value       = aws_subnet.public.id
+output "public_subnet_ids" {
+  description = "IDs de las subredes públicas (Frontend), indexadas por AZ"
+  value       = aws_subnet.public[*].id
 }
 
-output "private_subnet_id" {
-  description = "ID de la subred privada (Backend + Data)"
-  value       = aws_subnet.private.id
+output "private_backend_subnet_ids" {
+  description = "IDs de las subredes privadas Backend, indexadas por AZ"
+  value       = aws_subnet.private_backend[*].id
 }
 
-output "nat_gateway_id" {
-  description = "ID del NAT Gateway"
-  value       = aws_nat_gateway.main.id
+output "private_data_subnet_ids" {
+  description = "IDs de las subredes privadas Data, indexadas por AZ"
+  value       = aws_subnet.private_data[*].id
+}
+
+output "nat_gateway_ids" {
+  description = "IDs de los NAT Gateways, indexados por AZ"
+  value       = aws_nat_gateway.main[*].id
 }
 
 output "internet_gateway_id" {

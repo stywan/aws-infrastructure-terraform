@@ -3,55 +3,72 @@ output "vpc_id" {
   value       = module.networking.vpc_id
 }
 
-output "frontend_public_ip" {
-  description = "IP pública de la instancia Frontend"
-  value       = module.compute.frontend_public_ip
+# --- Subredes ---
+output "public_subnet_ids" {
+  description = "IDs de las subredes públicas (Frontend) por AZ"
+  value       = module.networking.public_subnet_ids
+}
+
+output "private_backend_subnet_ids" {
+  description = "IDs de las subredes privadas Backend por AZ"
+  value       = module.networking.private_backend_subnet_ids
+}
+
+output "private_data_subnet_ids" {
+  description = "IDs de las subredes privadas Data por AZ"
+  value       = module.networking.private_data_subnet_ids
+}
+
+# --- Frontend ---
+output "frontend_public_ips" {
+  description = "IPs públicas de las instancias Frontend"
+  value       = module.compute.frontend_public_ips
 }
 
 output "frontend_public_dns" {
-  description = "DNS público de la instancia Frontend"
+  description = "DNS públicos de las instancias Frontend"
   value       = module.compute.frontend_public_dns
 }
 
-output "backend_private_ip" {
-  description = "IP privada de la instancia Backend (solo accesible desde Frontend)"
-  value       = module.compute.backend_private_ip
+output "frontend_instance_ids" {
+  description = "IDs de las instancias Frontend (para SSM)"
+  value       = module.compute.frontend_instance_ids
 }
 
-output "data_private_ip" {
-  description = "IP privada de la instancia Data (solo accesible desde Backend)"
-  value       = module.compute.data_private_ip
+# --- Backend ---
+output "backend_private_ips" {
+  description = "IPs privadas de las instancias Backend"
+  value       = module.compute.backend_private_ips
 }
 
-output "web_url" {
-  description = "URL para acceder al servidor web Frontend"
-  value       = "http://${module.compute.frontend_public_ip}"
+output "backend_instance_ids" {
+  description = "IDs de las instancias Backend (para SSM)"
+  value       = module.compute.backend_instance_ids
 }
 
-output "ssh_frontend" {
-  description = "Comando SSH para conectarse al Frontend"
-  value       = var.key_name != null ? "ssh -i ${var.key_name}.pem ec2-user@${module.compute.frontend_public_ip}" : "Sin key pair configurado - usa SSM Session Manager"
+# --- Data ---
+output "data_private_ips" {
+  description = "IPs privadas de las instancias Data"
+  value       = module.compute.data_private_ips
 }
 
-output "ssm_frontend" {
-  description = "Comando AWS CLI para conectarse al Frontend via SSM"
-  value       = "aws ssm start-session --target ${module.compute.frontend_instance_id} --region ${var.aws_region}"
+output "data_instance_ids" {
+  description = "IDs de las instancias Data (para SSM)"
+  value       = module.compute.data_instance_ids
 }
 
-output "ssm_backend" {
-  description = "Comando AWS CLI para conectarse al Backend via SSM"
-  value       = "aws ssm start-session --target ${module.compute.backend_instance_id} --region ${var.aws_region}"
+# --- URLs de acceso ---
+output "web_urls" {
+  description = "URLs para acceder a los servidores Frontend"
+  value       = [for ip in module.compute.frontend_public_ips : "http://${ip}"]
 }
 
-output "ssm_data" {
-  description = "Comando AWS CLI para conectarse a la capa Data via SSM"
-  value       = "aws ssm start-session --target ${module.compute.data_instance_id} --region ${var.aws_region}"
-}
-
-output "conectividad_test" {
-  description = "Comandos para verificar conectividad entre capas"
+# --- Comandos SSM ---
+output "ssm_commands" {
+  description = "Comandos para conectarse via SSM Session Manager"
   value = {
-    desde_frontend_a_backend = "curl http://${module.compute.backend_private_ip}:8080"
-    desde_backend_a_data     = "mysql -h ${module.compute.data_private_ip} -u appuser -p'AppUser2024!' innovatech_db -e 'SELECT * FROM products;'"
+    frontend = [for id in module.compute.frontend_instance_ids : "aws ssm start-session --target ${id} --region ${var.aws_region}"]
+    backend  = [for id in module.compute.backend_instance_ids : "aws ssm start-session --target ${id} --region ${var.aws_region}"]
+    data     = [for id in module.compute.data_instance_ids : "aws ssm start-session --target ${id} --region ${var.aws_region}"]
   }
 }

@@ -8,17 +8,22 @@ variable "vpc_cidr" {
   type        = string
 }
 
-variable "public_subnet_cidr" {
-  description = "CIDR block de la subred pública"
-  type        = string
+variable "availability_zones" {
+  description = "Lista de zonas de disponibilidad (ej: [\"us-east-1a\", \"us-east-1b\"])"
+  type        = list(string)
 }
 
-variable "private_subnet_cidr" {
-  description = "CIDR block de la subred privada"
-  type        = string
+variable "public_subnet_cidrs" {
+  description = "CIDRs de subredes públicas, uno por AZ (ej: [\"10.0.1.0/24\", \"10.0.4.0/24\"])"
+  type        = list(string)
 }
 
-variable "availability_zone" {
-  description = "Zona de disponibilidad para ambas subredes"
-  type        = string
+variable "private_backend_subnet_cidrs" {
+  description = "CIDRs de subredes privadas para Backend, uno por AZ (ej: [\"10.0.2.0/24\", \"10.0.5.0/24\"])"
+  type        = list(string)
+}
+
+variable "private_data_subnet_cidrs" {
+  description = "CIDRs de subredes privadas para Data, uno por AZ (ej: [\"10.0.3.0/24\", \"10.0.6.0/24\"])"
+  type        = list(string)
 }

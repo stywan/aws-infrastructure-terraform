@@ -19,28 +19,33 @@ variable "key_name" {
   default     = null
 }
 
-variable "public_subnet_id" {
-  description = "ID de la subred pública (para Frontend)"
-  type        = string
+variable "public_subnet_ids" {
+  description = "IDs de las subredes públicas para Frontend, uno por AZ"
+  type        = list(string)
 }
 
-variable "private_subnet_id" {
-  description = "ID de la subred privada (para Backend y Data)"
-  type        = string
+variable "private_backend_subnet_ids" {
+  description = "IDs de las subredes privadas para Backend, uno por AZ"
+  type        = list(string)
+}
+
+variable "private_data_subnet_ids" {
+  description = "IDs de las subredes privadas para Data, uno por AZ"
+  type        = list(string)
 }
 
 variable "frontend_sg_id" {
-  description = "ID del Security Group del Frontend"
+  description = "ID del Security Group del Frontend (compartido entre AZs)"
   type        = string
 }
 
 variable "backend_sg_id" {
-  description = "ID del Security Group del Backend"
+  description = "ID del Security Group del Backend (compartido entre AZs)"
   type        = string
 }
 
 variable "data_sg_id" {
-  description = "ID del Security Group de la capa Data"
+  description = "ID del Security Group de la capa Data (compartido entre AZs)"
   type        = string
 }
 
