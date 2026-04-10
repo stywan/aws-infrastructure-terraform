@@ -19,14 +19,15 @@ echo "[1/4] Aplicando actualizaciones del sistema..."
 yum update -y
 echo "  -> Actualizaciones aplicadas"
 
-# --- 2. Instalar Docker y Git ---
-echo "[2/4] Instalando Docker y Git..."
-yum install -y docker git
+# --- 2. Instalar Docker, Git y cliente MySQL ---
+echo "[2/4] Instalando Docker, Git y cliente MySQL..."
+yum install -y docker git mariadb105
 systemctl start docker
 systemctl enable docker
 usermod -aG docker ec2-user
 echo "  -> Docker $(docker --version) instalado"
 echo "  -> Git $(git --version) instalado"
+echo "  -> Cliente MySQL (mariadb105) instalado"
 
 # --- 3. Crear microservicio Python ---
 echo "[3/4] Creando microservicio Python..."

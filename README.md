@@ -1,7 +1,6 @@
 # aws-infrastructure-terraform
 
-Implementación de infraestructura en AWS utilizando Terraform bajo principios de Infrastructure as Code (IaC). Arquitectura de tres capas (Frontend, Backend, Data) para la empresa **Innovatech Chile** — migración Lift & Shift a AWS.
-
+Implementación de infraestructura en AWS utilizando Terraform bajo principios de Infrastructure as Code (IaC). Arquitectura de tres capas (Frontend, Backend, Data) en **dos zonas de disponibilidad (Multi-AZ)** para la empresa **Innovatech Chile** — migración Lift & Shift a AWS.
 
 ---
 
@@ -14,18 +13,22 @@ Internet
 [Internet Gateway]
     │
 VPC: 10.0.0.0/16
-├── Subred Pública (10.0.1.0/24)
-│   ├── EC2 Frontend  — Nginx en Docker (puerto 80/443)
-│   └── NAT Gateway   — salida a internet para la subred privada
+├── us-east-1a
+│   ├── Subred Pública   (10.0.1.0/24)  → EC2 Frontend-1 (EIP: estática) + NAT Gateway-A
+│   ├── Subred Backend   (10.0.2.0/24)  → EC2 Backend-1  (IP privada)
+│   └── Subred Data      (10.0.3.0/24)  → EC2 Data-1     (IP privada)
 │
-└── Subred Privada (10.0.2.0/24)
-    ├── EC2 Backend   — Microservicio Python en Docker (puerto 8080)
-    └── EC2 Data      — MySQL 8.0 (puerto 3306)
+└── us-east-1b
+    ├── Subred Pública   (10.0.4.0/24)  → EC2 Frontend-2 (EIP: estática) + NAT Gateway-B
+    ├── Subred Backend   (10.0.5.0/24)  → EC2 Backend-2  (IP privada)
+    └── Subred Data      (10.0.6.0/24)  → EC2 Data-2     (IP privada)
 ```
 
 **Flujo de acceso:** `Internet → Frontend → Backend → Data`
 
-**Administración:** SSH (Frontend) + AWS Session Manager (las 3 instancias)
+**IPs estáticas (Elastic IPs):** asignadas a las instancias Frontend — no cambian al reiniciar.
+
+**Administración:** AWS Session Manager (las 6 instancias) + SSH opcional (solo Frontend)
 
 ---
 
@@ -33,17 +36,18 @@ VPC: 10.0.0.0/16
 
 ```
 ├── main.tf                          # Provider AWS + llamadas a módulos
-├── variables.tf                     # Variables de entrada
+├── variables.tf                     # Variables de entrada (Multi-AZ)
 ├── outputs.tf                       # IPs, URLs y comandos SSH/SSM
-├── terraform.tfvars.example         # Plantilla de configuración (copiar a terraform.tfvars)
+├── terraform.tfvars                 # Valores reales (local, NO se sube al repo)
+├── terraform.tfvars.example         # Plantilla de configuración
 └── modules/
-    ├── networking/                  # VPC, subredes, IGW, NAT Gateway, route tables
-    ├── security/                    # Security Groups por capa
-    └── compute/                     # Launch Templates, instancias EC2 y user data scripts
+    ├── networking/                  # VPC, 6 subredes, IGW, 2 NAT Gateways, route tables
+    ├── security/                    # Security Groups por capa (compartidos entre AZs)
+    └── compute/                     # Launch Templates, EC2 instances, Elastic IPs
         └── user_data/
             ├── frontend.sh          # Instala Docker + Nginx
             ├── backend.sh           # Instala Docker + microservicio Python
-            └── data.sh              # Instala Docker + MySQL 8.0
+            └── data.sh              # Instala Docker + MySQL 8.0 en contenedor
 ```
 
 ---
@@ -65,15 +69,18 @@ VPC: 10.0.0.0/16
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edita `terraform.tfvars` y completa al menos el `ami_id`. Para obtener el AMI más reciente de Amazon Linux 2023 en `us-east-1`:
+Edita `terraform.tfvars` y completa al menos el `ami_id`. Para obtener el AMI más reciente de Amazon Linux 2023 **estándar** (con SSM Agent incluido) en `us-east-1`:
 
 ```bash
 aws ec2 describe-images \
   --owners amazon \
-  --filters "Name=name,Values=al2023-ami-*-x86_64" "Name=state,Values=available" \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
   --query "sort_by(Images,&CreationDate)[-1].ImageId" \
-  --output text
+  --output text \
+  --region us-east-1
 ```
+
+> **Importante:** usar el filtro `al2023-ami-2023.*` (con fecha) y NO `al2023-ami-*` para evitar la versión minimal que no incluye SSM Agent preinstalado.
 
 ### 2. Inicializar Terraform
 
@@ -87,7 +94,7 @@ terraform init
 terraform plan
 ```
 
-Se crearán aproximadamente **20 recursos**. Revisa que todo sea correcto antes de aplicar.
+Se crearán aproximadamente **36 recursos**. Revisa que todo sea correcto antes de aplicar.
 
 ### 4. Desplegar la infraestructura
 
@@ -95,7 +102,7 @@ Se crearán aproximadamente **20 recursos**. Revisa que todo sea correcto antes 
 terraform apply
 ```
 
-El proceso tarda entre 3 y 5 minutos. El paso más lento es la creación del NAT Gateway (~2 min).
+El proceso tarda entre 5 y 8 minutos. El paso más lento es la creación de los 2 NAT Gateways (~2 min cada uno, en paralelo).
 
 ### 5. Ver outputs
 
@@ -106,13 +113,15 @@ terraform output
 Ejemplo de salida:
 
 ```
-frontend_public_ip  = "54.x.x.x"
-web_url             = "http://54.x.x.x"
-ssm_frontend        = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-ssm_backend         = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-ssm_data            = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-backend_private_ip  = "10.0.2.x"
-data_private_ip     = "10.0.2.x"
+frontend_public_ips  = ["44.216.157.73", "54.236.68.218"]
+web_urls             = ["http://44.216.157.73", "http://54.236.68.218"]
+backend_private_ips  = ["10.0.2.135", "10.0.5.210"]
+data_private_ips     = ["10.0.3.157", "10.0.6.89"]
+ssm_commands = {
+  frontend = ["aws ssm start-session --target i-xxx --region us-east-1", ...]
+  backend  = ["aws ssm start-session --target i-xxx --region us-east-1", ...]
+  data     = ["aws ssm start-session --target i-xxx --region us-east-1", ...]
+}
 ```
 
 ### 6. Destruir la infraestructura
@@ -121,47 +130,101 @@ data_private_ip     = "10.0.2.x"
 terraform destroy
 ```
 
-**Importante:** ejecutar siempre al finalizar la sesión de AWS Academy para evitar que los recursos sean eliminados abruptamente por el timeout del lab.
+**Importante:** ejecutar siempre al finalizar la sesión de AWS Academy para evitar que los recursos sean eliminados abruptamente por el timeout del lab, lo que puede dejar el `.tfstate` inconsistente.
+
+---
+
+## Sincronización del estado Terraform
+
+### Caso 1: Reiniciaste el lab y los recursos siguen activos
+
+Las credenciales expiran pero los recursos permanecen. Solo actualiza las credenciales y sincroniza el estado:
+
+```bash
+# 1. Actualizar ~/.aws/credentials con las nuevas credenciales del lab
+# 2. Sincronizar el estado local con AWS (sin crear ni destruir nada)
+terraform apply -refresh-only
+# 3. Confirmar con "yes" — solo actualiza el tfstate, no toca la infraestructura
+```
+
+### Caso 2: El lab expiró y AWS eliminó los recursos
+
+El `.tfstate` tiene IDs de recursos que ya no existen:
+
+```bash
+# 1. Borrar el estado viejo
+rm terraform.tfstate terraform.tfstate.backup
+# 2. Actualizar ami_id en terraform.tfvars (puede haber cambiado)
+# 3. Desplegar desde cero
+terraform init
+terraform apply
+```
+
+### Caso 3: Hay cambios en el repo que afectan recursos existentes
+
+Después de un `git pull`, Terraform puede detectar diferencias entre el código nuevo y la infraestructura actual:
+
+```bash
+# Ver qué cambiaría
+terraform plan
+# Si los cambios son esperados, aplicar
+terraform apply
+```
 
 ---
 
 ## Verificar conectividad entre capas
 
 ### Frontend accesible desde internet
+
 ```bash
-curl http://$(terraform output -raw frontend_public_ip)
+# Verificar ambos frontends
+curl http://44.216.157.73
+curl http://54.236.68.218
 ```
 
 ### Conectarse a las instancias via SSM
+
 ```bash
-# Frontend
-aws ssm start-session --target $(terraform output -raw frontend_instance_id) --region us-east-1
+# Ver los comandos exactos desde los outputs
+terraform output ssm_commands
 
-# Backend (desde cualquier terminal con credenciales)
-aws ssm start-session --target $(terraform output -raw backend_instance_id) --region us-east-1
+# Ejemplo Frontend-1
+aws ssm start-session --target i-03736d2c588dd1fed --region us-east-1
 
-# Data
-aws ssm start-session --target $(terraform output -raw data_instance_id) --region us-east-1
+# Ejemplo Backend-1
+aws ssm start-session --target i-0edea2fcf45956bee --region us-east-1
 ```
 
 ### Frontend → Backend (ejecutar dentro del Frontend via SSM)
+
 ```bash
-curl http://<backend_private_ip>:8080
+# Backend-1 (AZ-A)
+curl http://10.0.2.135:8080
+# Backend-2 (AZ-B)
+curl http://10.0.5.210:8080
 ```
 
 ### Backend → Data (ejecutar dentro del Backend via SSM)
+
 ```bash
-mysql -h <data_private_ip> -u appuser -p'AppUser2024!' innovatech_db -e "SELECT * FROM products;"
+# Data-1 (AZ-A)
+mysql -h 10.0.3.157 -u appuser -p'AppUser2024!' innovatech_db -e "SELECT * FROM products;"
+# Data-2 (AZ-B)
+mysql -h 10.0.6.89 -u appuser -p'AppUser2024!' innovatech_db -e "SELECT * FROM products;"
 ```
 
 ### Verificar Docker en cualquier instancia
+
 ```bash
 docker ps
 docker logs nginx-frontend    # en Frontend
 docker logs backend-service   # en Backend
+docker logs mysql-data        # en Data
 ```
 
 ### Verificar logs de user data (si algo falla)
+
 ```bash
 sudo cat /var/log/user-data.log
 ```
@@ -175,11 +238,12 @@ sudo cat /var/log/user-data.log
 | `aws_region` | `us-east-1` | Región AWS (no cambiar en Academy) |
 | `project_name` | `innovatech` | Prefijo para todos los recursos |
 | `vpc_cidr` | `10.0.0.0/16` | CIDR de la VPC |
-| `public_subnet_cidr` | `10.0.1.0/24` | Subred pública (Frontend) |
-| `private_subnet_cidr` | `10.0.2.0/24` | Subred privada (Backend + Data) |
-| `availability_zone` | `us-east-1a` | AZ para ambas subredes |
+| `availability_zones` | `["us-east-1a","us-east-1b"]` | Las 2 AZs a usar |
+| `public_subnet_cidrs` | `["10.0.1.0/24","10.0.4.0/24"]` | Subredes públicas (Frontend) |
+| `private_backend_subnet_cidrs` | `["10.0.2.0/24","10.0.5.0/24"]` | Subredes privadas Backend |
+| `private_data_subnet_cidrs` | `["10.0.3.0/24","10.0.6.0/24"]` | Subredes privadas Data |
 | `instance_type` | `t3.micro` | Tipo de instancia EC2 |
-| `ami_id` | *(requerido)* | AMI de Amazon Linux 2023 |
+| `ami_id` | *(requerido)* | AMI de Amazon Linux 2023 estándar |
 | `key_name` | `null` | Key Pair para SSH (opcional) |
 | `iam_instance_profile` | `LabInstanceProfile` | Instance Profile de AWS Academy |
 
@@ -189,15 +253,17 @@ sudo cat /var/log/user-data.log
 
 1. **Las credenciales expiran cada 4 horas.** Actualiza `~/.aws/credentials` con los valores del panel de Academy antes de cada sesión.
 
-2. **No se pueden crear roles IAM.** El código usa el `LabInstanceProfile` pre-existente mediante un `data source`. No intentes cambiar `iam_instance_profile` a un valor que no exista en tu cuenta.
+2. **No se pueden crear roles IAM.** El código usa el `LabInstanceProfile` pre-existente. No cambies este valor.
 
-3. **El estado de Terraform (`terraform.tfstate`) no persiste entre sesiones** si destruyes y recreas los recursos. El archivo `.tfstate` está en `.gitignore` por seguridad — guárdalo localmente entre sesiones si necesitas hacer cambios incrementales.
+3. **El estado de Terraform (`terraform.tfstate`) no debe subirse al repo.** Está en `.gitignore`. Guárdalo localmente entre sesiones.
 
-4. **Destruye los recursos antes de que termine la sesión** del lab. Si la sesión expira con recursos activos, AWS Academy los elimina sin respetar el estado de Terraform, lo que puede dejar el `.tfstate` inconsistente.
+4. **Destruye los recursos antes de que termine la sesión.** Si la sesión expira con recursos activos, AWS Academy los elimina sin respetar el estado de Terraform, dejando el `.tfstate` inconsistente. Ver sección de Sincronización.
 
-5. **El NAT Gateway genera costo.** En AWS Academy el crédito es limitado. Si no necesitas que las instancias privadas accedan a internet (después de la instalación inicial), considera que el NAT Gateway seguirá corriendo mientras el lab esté activo.
+5. **Los 2 NAT Gateways generan costo doble.** En AWS Academy el crédito es limitado. Considera esto si el lab va a estar activo por muchas horas.
 
-6. **SSM tarda 1-3 minutos** en registrar las instancias después de `terraform apply`. Si el comando `aws ssm start-session` falla inmediatamente después del apply, espera un momento y vuelve a intentarlo.
+6. **SSM tarda 1-3 minutos** en registrar las instancias después del `terraform apply`. Si falla inmediatamente después, espera y reintenta.
+
+7. **Las Elastic IPs del Frontend son estáticas** — no cambian aunque reinicies el lab o las instancias.
 
 ---
 
@@ -218,13 +284,15 @@ sudo cat /var/log/user-data.log
 | Recurso | Cantidad | Descripción |
 |---|---|---|
 | `aws_vpc` | 1 | VPC principal |
-| `aws_subnet` | 2 | Pública + Privada |
+| `aws_subnet` | 6 | 2 públicas + 2 backend + 2 data |
 | `aws_internet_gateway` | 1 | Salida a internet |
-| `aws_eip` | 1 | IP elástica para NAT |
-| `aws_nat_gateway` | 1 | Salida para subred privada |
-| `aws_route_table` | 2 | Pública + Privada |
-| `aws_route_table_association` | 2 | Asociaciones de subredes |
+| `aws_eip` (NAT) | 2 | IPs elásticas para NAT Gateways |
+| `aws_eip` (Frontend) | 2 | IPs elásticas estáticas para Frontend |
+| `aws_eip_association` | 2 | Asociación EIP ↔ Frontend |
+| `aws_nat_gateway` | 2 | Uno por AZ |
+| `aws_route_table` | 3 | 1 pública + 2 privadas (una por AZ) |
+| `aws_route_table_association` | 6 | Asociaciones de subredes |
 | `aws_security_group` | 3 | Frontend, Backend, Data |
-| `aws_launch_template` | 3 | Frontend, Backend, Data |
-| `aws_instance` | 3 | Frontend, Backend, Data |
-| **Total** | **20** | |
+| `aws_launch_template` | 6 | 2 Frontend + 2 Backend + 2 Data |
+| `aws_instance` | 6 | 2 Frontend + 2 Backend + 2 Data |
+| **Total** | **~36** | |

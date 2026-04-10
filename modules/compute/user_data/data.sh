@@ -45,19 +45,23 @@ echo "  -> Contenedor MySQL 8.0 lanzado"
 
 # --- 4. Configurar base de datos ---
 echo "[4/4] Configurando base de datos innovatech_db..."
-echo "  -> Esperando que MySQL esté listo..."
-for i in $(seq 1 60); do
+echo "  -> Esperando que MySQL responda al ping..."
+for i in $(seq 1 90); do
   if docker exec mysql-data mysqladmin ping -u root -p'InnovatechRoot2024!' --silent 2>/dev/null; then
-    echo "  -> MySQL listo después de ${i}s"
+    echo "  -> MySQL responde al ping después de ${i}s"
     break
   fi
   sleep 2
 done
 
-docker exec -i mysql-data mysql -u root -p'InnovatechRoot2024!' << 'SQLEOF'
-USE innovatech_db;
+# Espera adicional para que MySQL termine de inicializar usuarios y permisos
+echo "  -> Esperando inicialización completa de MySQL (20s extra)..."
+sleep 20
 
--- Tabla de productos de ejemplo
+# Reintentos para crear tabla e insertar datos
+for intento in 1 2 3; do
+  echo "  -> Intento ${intento} de configurar la base de datos..."
+  if docker exec -i mysql-data mysql -u root -p'InnovatechRoot2024!' innovatech_db -e "
 CREATE TABLE IF NOT EXISTS products (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   name        VARCHAR(100) NOT NULL,
@@ -65,16 +69,24 @@ CREATE TABLE IF NOT EXISTS products (
   price       DECIMAL(10,2) DEFAULT 0.00,
   created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Datos iniciales para verificar conectividad en la presentación
-INSERT INTO products (name, description, price) VALUES
-  ('Producto Alpha', 'Primer producto de Innovatech Chile', 99.99),
-  ('Producto Beta',  'Segundo producto de Innovatech Chile', 149.99),
-  ('Producto Gamma', 'Tercer producto de Innovatech Chile', 199.99);
-
-SELECT 'Base de datos innovatech_db configurada correctamente' AS status;
+INSERT INTO products (name, description, price)
+SELECT 'Producto Alpha', 'Primer producto de Innovatech Chile', 99.99
+WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = 'Producto Alpha');
+INSERT INTO products (name, description, price)
+SELECT 'Producto Beta', 'Segundo producto de Innovatech Chile', 149.99
+WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = 'Producto Beta');
+INSERT INTO products (name, description, price)
+SELECT 'Producto Gamma', 'Tercer producto de Innovatech Chile', 199.99
+WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = 'Producto Gamma');
 SELECT COUNT(*) AS total_productos FROM products;
-SQLEOF
+"; then
+    echo "  -> Base de datos configurada correctamente en intento ${intento}"
+    break
+  else
+    echo "  -> Intento ${intento} fallido, esperando 10s..."
+    sleep 10
+  fi
+done
 
 echo "============================================"
 echo "  Data Tier listo."
@@ -83,8 +95,7 @@ echo "  Base de datos: innovatech_db"
 echo "  Usuario app: appuser / AppUser2024!"
 echo ""
 echo "  Verificar desde Backend:"
-echo "  mysql -h <DATA_IP> -u appuser -p'AppUser2024!' innovatech_db"
-echo "  -> SELECT * FROM products;"
+echo "  mysql -h <DATA_IP> -u appuser -p'AppUser2024!' innovatech_db -e 'SELECT * FROM products;'"
 echo ""
 echo "  Log completo: /var/log/user-data.log"
 echo "============================================"

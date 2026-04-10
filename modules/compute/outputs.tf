@@ -4,13 +4,13 @@ output "frontend_instance_ids" {
 }
 
 output "frontend_public_ips" {
-  description = "IPs públicas de las instancias Frontend"
-  value       = aws_instance.frontend[*].public_ip
+  description = "Elastic IPs estáticas de las instancias Frontend"
+  value       = aws_eip.frontend[*].public_ip
 }
 
 output "frontend_public_dns" {
-  description = "DNS públicos de las instancias Frontend"
-  value       = aws_instance.frontend[*].public_dns
+  description = "DNS públicos de las instancias Frontend (via Elastic IP)"
+  value       = aws_eip.frontend[*].public_dns
 }
 
 output "backend_instance_ids" {

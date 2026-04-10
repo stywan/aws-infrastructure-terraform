@@ -199,3 +199,25 @@ resource "aws_instance" "data" {
     Project = var.project_name
   }
 }
+
+# =============================================================================
+# ELASTIC IPs — una por instancia Frontend
+# Proveen IPs públicas estáticas que no cambian al detener/iniciar las instancias
+# =============================================================================
+
+resource "aws_eip" "frontend" {
+  count    = length(var.public_subnet_ids)
+  domain   = "vpc"
+
+  tags = {
+    Name    = "${var.project_name}-eip-frontend-${count.index + 1}"
+    Tier    = "frontend"
+    Project = var.project_name
+  }
+}
+
+resource "aws_eip_association" "frontend" {
+  count         = length(var.public_subnet_ids)
+  instance_id   = aws_instance.frontend[count.index].id
+  allocation_id = aws_eip.frontend[count.index].id
+}

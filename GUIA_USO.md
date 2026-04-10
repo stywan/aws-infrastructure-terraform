@@ -1,6 +1,6 @@
 # Guía de uso — Infraestructura Innovatech Chile en AWS
 
-Esta guía explica paso a paso cómo desplegar, usar y destruir la infraestructura desde cero, incluyendo el workflow de cada sesión de AWS Academy.
+Esta guía explica paso a paso cómo desplegar, usar y destruir la infraestructura desde cero, incluyendo el workflow de cada sesión de AWS Academy y cómo manejar los casos frecuentes de desincronización de estado.
 
 ---
 
@@ -13,8 +13,9 @@ Esta guía explica paso a paso cómo desplegar, usar y destruir la infraestructu
 5. [Verificar que todo funciona](#5-verificar-que-todo-funciona)
 6. [Conectarse a las instancias](#6-conectarse-a-las-instancias)
 7. [Workflow de sesiones siguientes](#7-workflow-de-sesiones-siguientes)
-8. [Destruir la infraestructura](#8-destruir-la-infraestructura)
-9. [Solución de problemas](#9-solución-de-problemas)
+8. [Sincronización del estado Terraform](#8-sincronización-del-estado-terraform)
+9. [Destruir la infraestructura](#9-destruir-la-infraestructura)
+10. [Solución de problemas](#10-solución-de-problemas)
 
 ---
 
@@ -45,6 +46,8 @@ aws --version
 # Debe mostrar: aws-cli/2.x.x
 ```
 
+> En Windows: descargar desde https://aws.amazon.com/cli/
+
 ### Plugin de Session Manager (para conectarse via SSM)
 
 ```bash
@@ -57,6 +60,16 @@ session-manager-plugin --version
 
 > En Windows: descargar desde https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
 
+### Crear la carpeta de credenciales AWS (si no existe)
+
+```bash
+# macOS/Linux
+mkdir -p ~/.aws
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.aws"
+```
+
 ---
 
 ## 2. Configuración inicial del proyecto (primera vez)
@@ -66,6 +79,7 @@ session-manager-plugin --version
 ```bash
 git clone <url-del-repo>
 cd aws-infrastructure-terraform
+git checkout feature/pipeline
 ```
 
 ### Crear el archivo de variables
@@ -83,13 +97,15 @@ Con las credenciales de AWS Academy ya configuradas (ver sección 3), ejecuta:
 ```bash
 aws ec2 describe-images \
   --owners amazon \
-  --filters "Name=name,Values=al2023-ami-*-x86_64" "Name=state,Values=available" \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
   --query "sort_by(Images,&CreationDate)[-1].ImageId" \
-  --output text
+  --output text \
   --region us-east-1
 ```
 
-Copia el resultado (algo como `ami-0abcdef1234567890`) y pégalo en `terraform.tfvars`:
+> **Importante:** usar `al2023-ami-2023.*` (con fecha) y NO `al2023-ami-*` para evitar la versión minimal que no incluye SSM Agent.
+
+Copia el resultado y pégalo en `terraform.tfvars`:
 
 ```hcl
 ami_id = "ami-0abcdef1234567890"
@@ -100,18 +116,18 @@ ami_id = "ami-0abcdef1234567890"
 Si quieres acceso SSH además de SSM:
 
 1. Ve a **EC2 Console → Key Pairs → Create key pair**
-2. Nombre: `vockey` (o el que prefieras), tipo RSA, formato `.pem`
-3. Descarga el archivo `.pem` y guárdalo en `~/.ssh/`
+2. Nombre: `vockey`, tipo RSA, formato `.pem`
+3. Descarga el `.pem` y guárdalo en `~/.ssh/`
 4. Dale permisos correctos:
    ```bash
    chmod 400 ~/.ssh/vockey.pem
    ```
-5. Descomenta y completa en `terraform.tfvars`:
+5. Descomenta en `terraform.tfvars`:
    ```hcl
    key_name = "vockey"
    ```
 
-> Sin key pair, puedes usar SSM Session Manager para conectarte a las 3 instancias sin problema.
+> Sin key pair, SSM Session Manager funciona perfectamente para las 6 instancias.
 
 ### Inicializar Terraform (solo la primera vez o al cambiar providers)
 
@@ -119,29 +135,29 @@ Si quieres acceso SSH además de SSM:
 terraform init
 ```
 
-Verás que descarga el provider de AWS. Solo necesitas hacer esto una vez, a menos que cambies la versión del provider.
-
 ---
 
 ## 3. Iniciar sesión en AWS Academy
 
-**Este paso es obligatorio al inicio de cada sesión** porque las credenciales de AWS Academy expiran cada 4 horas.
+**Este paso es obligatorio al inicio de cada sesión** porque las credenciales expiran cada 4 horas.
 
 1. Ingresa a **AWS Academy → Learner Lab**
 2. Haz clic en **Start Lab** y espera que el círculo se ponga verde
 3. Haz clic en **AWS Details** → **AWS CLI**
-4. Copia el bloque de credenciales que aparece:
+4. Copia el bloque de credenciales:
    ```
    [default]
    aws_access_key_id=ASIA...
    aws_secret_access_key=...
    aws_session_token=...
    ```
-5. Pégalo reemplazando el contenido de `~/.aws/credentials`:
+5. Pégalo en `~/.aws/credentials`:
    ```bash
-   # Abrir el archivo de credenciales
+   # macOS/Linux
    nano ~/.aws/credentials
-   # (pegar y guardar con Ctrl+O, Enter, Ctrl+X)
+
+   # Windows
+   notepad "$env:USERPROFILE\.aws\credentials"
    ```
 
 ### Verificar que las credenciales funcionan
@@ -150,7 +166,7 @@ Verás que descarga el provider de AWS. Solo necesitas hacer esto una vez, a men
 aws sts get-caller-identity
 ```
 
-Debes ver tu Account ID y el rol `LabRole`. Si ves un error de autenticación, repite el paso anterior.
+Debe mostrar tu Account ID y el rol `LabRole`. Si ves error de autenticación, repite el paso anterior.
 
 ---
 
@@ -162,7 +178,7 @@ Debes ver tu Account ID y el rol `LabRole`. Si ves un error de autenticación, r
 terraform plan
 ```
 
-Debes ver **20 recursos a crear**. Revisa que no haya errores antes de continuar.
+Debes ver **~36 recursos a crear**. Revisa que no haya errores.
 
 ### Aplicar
 
@@ -170,15 +186,16 @@ Debes ver **20 recursos a crear**. Revisa que no haya errores antes de continuar
 terraform apply
 ```
 
-Escribe `yes` cuando lo pida y presiona Enter.
+Escribe `yes` cuando lo pida.
 
 **Tiempos aproximados:**
+
 | Recurso | Tiempo |
 |---|---|
 | VPC, subredes, SGs | ~30 segundos |
-| NAT Gateway | ~2 minutos |
-| EC2 instances | ~1 minuto |
-| **Total** | **~3-5 minutos** |
+| 2 NAT Gateways (en paralelo) | ~2-3 minutos |
+| EC2 instances + EIPs | ~1-2 minutos |
+| **Total** | **~5-8 minutos** |
 
 ### Ver los outputs al finalizar
 
@@ -186,34 +203,35 @@ Escribe `yes` cuando lo pida y presiona Enter.
 terraform output
 ```
 
-Guarda estos valores — los necesitarás para conectarte y verificar la infraestructura:
+Guarda estos valores — los necesitarás para conectarte:
 
 ```
-frontend_public_ip  = "54.x.x.x"
-web_url             = "http://54.x.x.x"
-ssm_frontend        = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-ssm_backend         = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-ssm_data            = "aws ssm start-session --target i-xxxxxxxxx --region us-east-1"
-backend_private_ip  = "10.0.2.x"
-data_private_ip     = "10.0.2.x"
+frontend_public_ips = ["44.x.x.x", "54.x.x.x"]
+web_urls            = ["http://44.x.x.x", "http://54.x.x.x"]
+backend_private_ips = ["10.0.2.x", "10.0.5.x"]
+data_private_ips    = ["10.0.3.x", "10.0.6.x"]
+ssm_commands = {
+  frontend = ["aws ssm start-session --target i-xxx ...", ...]
+  backend  = ["aws ssm start-session --target i-xxx ...", ...]
+  data     = ["aws ssm start-session --target i-xxx ...", ...]
+}
 ```
 
-> El `terraform.tfstate` se guarda localmente y está en `.gitignore`. **No lo borres** entre sesiones — es el mapa que Terraform usa para saber qué recursos ya existen.
+> El `terraform.tfstate` se guarda localmente. **No lo borres** entre sesiones — es el mapa que Terraform usa para saber qué recursos ya existen en AWS.
 
 ---
 
 ## 5. Verificar que todo funciona
 
-Espera 2-3 minutos después del `terraform apply` para que los user data scripts terminen de instalar Docker, MySQL, etc.
+Espera **3-5 minutos** después del `terraform apply` para que los scripts de user data terminen.
 
 ### Frontend accesible desde internet
 
 ```bash
-curl http://$(terraform output -raw frontend_public_ip)
-# Debes ver el HTML de la página de Innovatech Chile
+# Abrir en el navegador o con curl (usar las IPs del output)
+curl http://44.x.x.x
+# Debe mostrar el HTML de la página Innovatech Chile
 ```
-
-O abre directamente en el navegador: `http://<frontend_public_ip>`
 
 ### Microservicio Backend respondiendo
 
@@ -228,7 +246,6 @@ curl http://localhost:8080
 Desde SSM en el Frontend:
 ```bash
 curl http://<backend_private_ip>:8080
-# Misma respuesta JSON del microservicio
 ```
 
 ### Backend puede llegar a la base de datos
@@ -237,52 +254,46 @@ Desde SSM en el Backend:
 ```bash
 mysql -h <data_private_ip> -u appuser -p'AppUser2024!' innovatech_db \
   -e "SELECT * FROM products;"
-# Debes ver 3 filas de productos
+# Debe mostrar 3 filas de productos
 ```
 
-### Verificar que Docker está corriendo en cada instancia
+### Verificar Docker en cada instancia
 
 ```bash
 docker ps
-# Frontend: debe mostrar el contenedor nginx-frontend
-# Backend:  debe mostrar el contenedor backend-service
-# Data:     puede no tener contenedores (MySQL se instaló directamente)
+# Frontend: contenedor nginx-frontend
+# Backend:  contenedor backend-service
+# Data:     contenedor mysql-data
 ```
 
 ---
 
 ## 6. Conectarse a las instancias
 
-### Via AWS Session Manager (recomendado, no requiere key pair)
+### Via AWS Session Manager (recomendado)
 
 ```bash
-# Copiar el comando exacto desde los outputs de Terraform
-terraform output ssm_frontend
-terraform output ssm_backend
-terraform output ssm_data
+# Ver los comandos exactos desde los outputs
+terraform output ssm_commands
 
-# Ejemplo de conexión al Frontend
+# Conectarse (ejemplo Frontend-1)
 aws ssm start-session --target i-0abc123def456 --region us-east-1
 ```
 
-> SSM tarda **1-3 minutos** en registrar las instancias después del `terraform apply`. Si falla, espera un momento y vuelve a intentar.
+> SSM tarda **1-3 minutos** en registrar las instancias después del apply. Si falla, espera y reintenta.
 
-Una vez dentro de la sesión SSM, cambiar a ec2-user:
+Una vez dentro, cambiar a ec2-user:
 ```bash
 sudo su - ec2-user
 ```
 
-### Via SSH (solo Frontend, requiere key pair configurado)
+### Via SSH (solo Frontend, requiere key pair)
 
 ```bash
-# El output de Terraform te da el comando exacto
-terraform output ssh_frontend
-
-# O manualmente:
 ssh -i ~/.ssh/vockey.pem ec2-user@<frontend_public_ip>
 ```
 
-### Ver logs de instalación (si algo no funciona)
+### Ver logs de instalación
 
 ```bash
 sudo cat /var/log/user-data.log
@@ -292,94 +303,188 @@ sudo cat /var/log/user-data.log
 
 ## 7. Workflow de sesiones siguientes
 
-Las credenciales de AWS Academy duran **4 horas**. En cada nueva sesión:
+Las credenciales de AWS Academy duran **4 horas**. Al iniciar una nueva sesión:
 
 ```bash
-# 1. Actualizar credenciales en ~/.aws/credentials (ver sección 3)
+# 1. Actualizar credenciales (ver sección 3)
+nano ~/.aws/credentials
 
 # 2. Verificar que funcionan
 aws sts get-caller-identity
 
-# 3. Si destruiste los recursos al cerrar la sesión anterior, volver a desplegar
-terraform apply
+# 3. Sincronizar el estado Terraform con AWS (sin cambiar nada)
+terraform apply -refresh-only
+# → escribir "yes" para actualizar el tfstate local
 
-# 4. Si los recursos siguen activos (misma sesión de lab), solo verificar
+# 4. Ver el estado actual
 terraform output
 ```
 
-> Si el lab expiró con recursos activos, el `.tfstate` puede quedar desincronizado. En ese caso ejecuta `terraform destroy` (ignorará los errores de recursos que ya no existen) y luego `terraform apply` para empezar limpio.
+---
+
+## 8. Sincronización del estado Terraform
+
+Este es uno de los temas más importantes al trabajar con AWS Academy. El archivo `.tfstate` es el registro local de Terraform sobre qué recursos existen en AWS. Puede desincronizarse en varios escenarios.
 
 ---
 
-## 8. Destruir la infraestructura
+### Caso A: Reiniciaste el lab — los recursos siguen activos
 
-**Hacer siempre antes de cerrar el lab** para evitar que AWS Academy elimine los recursos abruptamente y deje el estado de Terraform inconsistente.
+Las credenciales expiran pero los recursos permanecen en AWS. Terraform puede detectar diferencias menores (IPs dinámicas reasignadas, etc.).
+
+```bash
+# 1. Actualizar credenciales en ~/.aws/credentials
+
+# 2. Sincronizar sin tocar infraestructura
+terraform apply -refresh-only
+
+# 3. Cuando pregunte "Would you like to update the Terraform state?"
+#    escribir "yes" — solo actualiza el tfstate local, NO modifica AWS
+
+# 4. Verificar que todo está en orden
+terraform plan
+# Debe mostrar: No changes o cambios mínimos esperados
+```
+
+---
+
+### Caso B: El lab expiró y AWS eliminó todos los recursos
+
+El `.tfstate` tiene IDs de recursos que ya no existen en AWS.
+
+```bash
+# 1. Eliminar el estado viejo
+rm terraform.tfstate terraform.tfstate.backup
+
+# 2. Actualizar el ami_id en terraform.tfvars con el nuevo AMI
+aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+  --query "sort_by(Images,&CreationDate)[-1].ImageId" \
+  --output text \
+  --region us-east-1
+
+# 3. Desplegar desde cero
+terraform init   # solo si es necesario
+terraform apply
+```
+
+---
+
+### Caso C: Hay cambios en el repo que modifican recursos existentes
+
+Después de un `git pull`, Terraform puede detectar diferencias entre el código nuevo y la infraestructura que está corriendo.
+
+```bash
+# 1. Traer los últimos cambios del repo
+git pull origin feature/pipeline
+
+# 2. Ver exactamente qué cambiaría
+terraform plan
+# Revisar el output:
+#   ~ update in-place  → instancia se actualiza sin recrearse
+#   -/+ destroy/create → instancia se recrea (ojo: pierde datos)
+
+# 3. Si los cambios son esperados, aplicar
+terraform apply
+```
+
+> Si el plan muestra `-/+` en instancias Data, significa que MySQL se recreará y perderá los datos de la sesión. Para un entorno de lab esto es aceptable.
+
+---
+
+### Caso D: PC nuevo — no tengo el tfstate
+
+Si perdiste el `.tfstate` pero los recursos siguen activos en AWS:
+
+```bash
+# Opción 1 (recomendada): destruir los recursos desde la consola AWS manualmente
+# y luego hacer terraform apply desde cero
+
+# Opción 2: sincronizar con terraform import (avanzado, recurso por recurso)
+# No recomendado para el lab — mejor destruir y recrear
+```
+
+---
+
+## 9. Destruir la infraestructura
+
+**Hacer siempre antes de cerrar el lab** para evitar inconsistencias en el `.tfstate`.
 
 ```bash
 terraform destroy
 ```
 
-Escribe `yes` cuando lo pida. Tarda ~2-3 minutos.
+Escribe `yes` cuando lo pida. Tarda ~3-5 minutos.
 
-Verifica que se eliminaron todos los recursos:
+Verifica que se eliminó todo:
 ```bash
 terraform show
-# Debe mostrar: No state. (estado vacío)
+# Debe mostrar: No state.
 ```
 
 ---
 
-## 9. Solución de problemas
+## 10. Solución de problemas
 
 ### Error: `ExpiredTokenException` o `InvalidClientTokenId`
 
-**Causa:** Las credenciales de AWS Academy expiraron.
+**Causa:** Credenciales de AWS Academy expiradas.
 
 **Solución:** Actualizar `~/.aws/credentials` con las nuevas credenciales del panel de Academy (sección 3).
 
 ---
 
+### Error: `NoRegion` al correr comandos AWS CLI
+
+**Causa:** No se especificó la región.
+
+**Solución:** Agregar `--region us-east-1` al comando, o configurar la región por defecto:
+```bash
+aws configure set region us-east-1
+```
+
+---
+
 ### SSM no conecta después del apply
 
-**Causa:** El agente SSM en la instancia todavía está arrancando (normal los primeros 1-3 minutos).
+**Causa:** El agente SSM todavía está arrancando (normal los primeros 1-3 minutos).
 
-**Solución:** Esperar 2-3 minutos y volver a intentar. Si sigue fallando después de 5 minutos:
-
+**Solución:** Esperar y reintentar. Para verificar cuáles instancias ya están registradas:
 ```bash
-# Verificar que la instancia tiene el LabInstanceProfile asignado
-aws ec2 describe-instances \
-  --filters "Name=tag:Project,Values=innovatech" \
-  --query "Reservations[].Instances[].{ID:InstanceId,Profile:IamInstanceProfile.Arn,State:State.Name}"
+aws ssm describe-instance-information \
+  --region us-east-1 \
+  --query "InstanceInformationList[*].{ID:InstanceId,Status:PingStatus}" \
+  --output table
+# Esperar a que todas aparezcan como "Online"
 ```
 
 ---
 
 ### El Frontend no carga en el navegador
 
-**Causa 1:** Los user data scripts todavía están corriendo (Docker pull de Nginx puede tardar).
+**Causa 1:** Los scripts de user data todavía están corriendo (Docker pull puede tardar).
 
-**Solución:** Esperar 2-3 minutos y recargar.
+**Solución:** Esperar 3-5 minutos y recargar.
 
 **Causa 2:** El script de user data falló.
 
-**Solución:** Conectarse via SSM y revisar el log:
+**Solución:** Conectarse via SSM y revisar:
 ```bash
 sudo cat /var/log/user-data.log
-# Buscar líneas con "error" o donde se cortó la ejecución
 ```
 
 ---
 
 ### MySQL no responde desde el Backend
 
-**Causa:** El script de user data de la instancia Data todavía está ejecutándose o falló.
+**Causa:** El contenedor Docker de MySQL en la instancia Data todavía está iniciando.
 
 **Solución:** Conectarse a la instancia Data via SSM y verificar:
-
 ```bash
 sudo cat /var/log/user-data.log   # ver si completó
-sudo systemctl status mysqld       # ver estado de MySQL
-sudo journalctl -u mysqld -n 50    # ver logs de MySQL
+docker ps                          # ver si el contenedor mysql-data está corriendo
+docker logs mysql-data             # ver logs de MySQL
 ```
 
 ---
@@ -390,13 +495,28 @@ sudo journalctl -u mysqld -n 50    # ver logs de MySQL
 
 **Solución:**
 ```bash
-# Intentar destruir primero (ignorará errores de recursos que ya no existen)
+# Intentar destruir primero
 terraform destroy
 
-# Si terraform destroy falla, importar el estado existente o limpiar manualmente desde la consola AWS
-# Luego volver a aplicar
+# Si falla, borrar el tfstate y desplegar desde cero
+rm terraform.tfstate terraform.tfstate.backup
 terraform apply
 ```
+
+---
+
+### `terraform plan` muestra muchos cambios inesperados después de un `git pull`
+
+**Causa:** Alguien del equipo modificó scripts de user data u otros archivos en el repo.
+
+**Solución:** Revisar el plan con cuidado:
+```bash
+terraform plan
+# Los cambios ~ (update in-place) son seguros
+# Los cambios -/+ (destroy+create) recrean la instancia
+```
+
+Si no quieres aplicar los cambios ahora, simplemente no hagas `terraform apply`.
 
 ---
 
@@ -404,12 +524,12 @@ terraform apply
 
 **Causa:** El `LabInstanceProfile` no existe en esta cuenta de AWS Academy.
 
-**Solución:** Verificar el nombre exacto del profile disponible:
+**Solución:**
 ```bash
 aws iam list-instance-profiles --query "InstanceProfiles[].InstanceProfileName"
 ```
 
-Actualizar el valor en `terraform.tfvars`:
+Actualizar en `terraform.tfvars`:
 ```hcl
-iam_instance_profile = "<nombre-exacto-del-profile>"
+iam_instance_profile = "<nombre-exacto>"
 ```
