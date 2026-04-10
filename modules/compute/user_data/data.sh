@@ -3,8 +3,9 @@
 # User Data: Data (capa privada)
 # - Aplica actualizaciones de seguridad
 # - Instala Docker y Git
-# - Instala MySQL 8.0 via yum (mysql-server en Amazon Linux 2023)
+# - Lanza MySQL 8.0 en Docker en puerto 3306
 # - Crea base de datos innovatech_db con tabla y datos de ejemplo
+# Nota: mysql-server no está en los repos de Amazon Linux 2023; se usa Docker.
 # Log: /var/log/user-data.log
 # =============================================================================
 set -e
@@ -29,58 +30,34 @@ usermod -aG docker ec2-user
 echo "  -> Docker $(docker --version) instalado"
 echo "  -> Git $(git --version) instalado"
 
-# --- 3. Instalar MySQL 8.0 ---
-echo "[3/4] Instalando MySQL 8.0..."
-yum install -y mysql-server
-systemctl start mysqld
-systemctl enable mysqld
-echo "  -> MySQL instalado y servicio iniciado"
-
-# Esperar a que MySQL esté listo para aceptar conexiones
-echo "  -> Esperando que MySQL esté listo..."
-for i in {1..30}; do
-  if mysqladmin ping --silent 2>/dev/null; then
-    echo "  -> MySQL listo después de ${i}s"
-    break
-  fi
-  sleep 1
-done
+# --- 3. Lanzar MySQL 8.0 en Docker ---
+echo "[3/4] Lanzando MySQL 8.0 en Docker..."
+docker run -d \
+  --name mysql-data \
+  --restart unless-stopped \
+  -e MYSQL_ROOT_PASSWORD='InnovatechRoot2024!' \
+  -e MYSQL_DATABASE=innovatech_db \
+  -e MYSQL_USER=appuser \
+  -e MYSQL_PASSWORD='AppUser2024!' \
+  -p 3306:3306 \
+  mysql:8.0
+echo "  -> Contenedor MySQL 8.0 lanzado"
 
 # --- 4. Configurar base de datos ---
 echo "[4/4] Configurando base de datos innovatech_db..."
+echo "  -> Esperando que MySQL esté listo..."
+for i in $(seq 1 60); do
+  if docker exec mysql-data mysqladmin ping -u root -p'InnovatechRoot2024!' --silent 2>/dev/null; then
+    echo "  -> MySQL listo después de ${i}s"
+    break
+  fi
+  sleep 2
+done
 
-# Amazon Linux 2023 con mysql-server puede arrancar sin contraseña o con temp password
-TEMP_PASS=$(grep 'temporary password' /var/log/mysqld.log 2>/dev/null | awk '{print $NF}' | tail -1)
-
-if [ -n "$TEMP_PASS" ]; then
-  echo "  -> Contraseña temporal encontrada, cambiando..."
-  mysql --connect-expired-password -u root -p"${TEMP_PASS}" << 'SQLEOF'
-ALTER USER 'root'@'localhost' IDENTIFIED BY 'InnovatechRoot2024!';
-SQLEOF
-  ROOT_PASS="InnovatechRoot2024!"
-else
-  echo "  -> MySQL sin contraseña inicial, configurando..."
-  # En algunas versiones de AL2023, mysql arranca sin contraseña
-  mysql -u root << 'SQLEOF'
-ALTER USER 'root'@'localhost' IDENTIFIED BY 'InnovatechRoot2024!';
-SQLEOF
-  ROOT_PASS="InnovatechRoot2024!"
-fi
-
-# Crear base de datos, usuario de aplicación y tabla inicial
-mysql -u root -p"${ROOT_PASS}" << 'SQLEOF'
--- Base de datos principal
-CREATE DATABASE IF NOT EXISTS innovatech_db
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
--- Usuario para la aplicación (acceso desde Backend)
-CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'AppUser2024!';
-GRANT ALL PRIVILEGES ON innovatech_db.* TO 'appuser'@'%';
-FLUSH PRIVILEGES;
+docker exec -i mysql-data mysql -u root -p'InnovatechRoot2024!' << 'SQLEOF'
+USE innovatech_db;
 
 -- Tabla de productos de ejemplo
-USE innovatech_db;
 CREATE TABLE IF NOT EXISTS products (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   name        VARCHAR(100) NOT NULL,
